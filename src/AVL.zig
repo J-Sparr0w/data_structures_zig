@@ -1,9 +1,6 @@
 const std = @import("std");
 
-const Direction = enum {
-    Left,
-    Right,
-};
+//TODO: deletion of nodes
 
 fn AVL(comptime T: type) type {
     return struct {
@@ -48,7 +45,7 @@ fn AVL(comptime T: type) type {
             };
         }
 
-        fn search(self: Self, s: T) ?*const Node {
+        fn search(self: Self, s: T) ?*Node {
             var curr_node = self.root orelse {
                 std.debug.print("\nThe tree is empty.......", .{});
                 return null;
@@ -71,24 +68,127 @@ fn AVL(comptime T: type) type {
                     }
                 }
             } else {
-                std.debug.print("\nElement Found!!\n", .{});
+                std.debug.print("\nTree contains {}!!\n", .{s});
                 return curr_node;
             }
 
             return null;
         }
 
-        fn insert(self: *Self, data: usize) !void {
-            var path = std.ArrayList(Direction).init(self.allocator);
-            defer path.deinit();
+        fn delete(self: *Self, data: T) void {
+            var node = self.search(data) orelse return;
+            var child_count: u8 = 0;
+            if (node.*.left != null) {
+                child_count += 1;
+            }
+            if (node.*.right != null) {
+                child_count += 1;
+            }
 
+            //no child  -update parent and delete node
+            if (child_count == 0) {
+                self.deleteLeafNode(node);
+            } else {
+
+                //one child - replace node with child, i.e. update child and parent of node before deleting
+                if (child_count == 1) {
+                    self.deleteSingleChildedNode(node);
+                }
+                //two child - find inorder successor , replace node with successor and delete node
+                else if (child_count == 2) {
+                    var left_child = node.*.left.?;
+                    var right_child = node.*.right.?;
+                    var node_parent = node.*.parent;
+
+                    var inorder_successor = inorderSuccessor(node);
+                    var inorder_successor_child = inorder_successor.*.right;
+
+                    if (inorder_successor.*.parent) |*parent| {
+                        if (inorder_successor.*.data < parent.*.data) {
+                            parent.*.left = node;
+                        } else {
+                            parent.*.right = node;
+                        }
+                        node.*.parent = parent.*;
+                    }
+
+                    if (node_parent) |*parent| {
+                        if (node.*.data < parent.*.data) {
+                            parent.*.left = inorder_successor;
+                        } else {
+                            parent.*.right = inorder_successor;
+                        }
+                        inorder_successor.*.parent = parent.*;
+                    } else if (node == self.*.root) {
+                        self.root = inorder_successor;
+                        inorder_successor.*.parent = null;
+                    }
+
+                    inorder_successor.*.right = right_child;
+                    right_child.*.parent = inorder_successor;
+                    inorder_successor.*.left = left_child;
+                    left_child.*.parent = inorder_successor;
+
+                    if (inorder_successor_child) |*child| {
+                        child.*.parent = node;
+                        self.deleteSingleChildedNode(node);
+                    } else {
+                        self.deleteLeafNode(node);
+                    }
+                }
+            }
+        }
+
+        fn deleteSingleChildedNode(self: *Self, node: *const Node) void {
+            const child = node.*.left orelse node.*.right.?;
+
+            child.*.parent = node.*.parent;
+
+            if (node.*.parent) |*parent| {
+                if (node.*.data < parent.*.data) {
+                    parent.*.left = child;
+                } else {
+                    parent.*.right = child;
+                }
+            }
+            std.debug.print("\ndeleted: {}", .{node.*.data});
+            self.freeNode(node);
+        }
+
+        fn deleteLeafNode(self: *Self, node: *const Node) void {
+            if (node.*.parent) |*parent| {
+                if (node.*.data < parent.*.data) {
+                    parent.*.left = null;
+                } else {
+                    parent.*.right = null;
+                }
+            }
+
+            std.debug.print("\ndeleted: {}", .{node.*.data});
+            self.freeNode(node);
+        }
+
+        fn freeNode(self: *Self, node: *const Node) void {
+            self.*.count -= 1;
+            self.allocator.destroy(node);
+        }
+
+        fn inorderSuccessor(node: *const Node) *Node {
+            var curr_node = node.*.right.?;
+
+            while (curr_node.left) |left_node| {
+                curr_node = left_node;
+            }
+            return curr_node;
+        }
+
+        fn insert(self: *Self, data: T) !void {
             if (self.root == null) {
                 self.root = try self.newNode(data, null);
             } else {
                 var curr_node = self.root;
                 while (curr_node) |*node| {
                     if (data < node.*.data) {
-                        try path.append(Direction.Left);
                         if (node.*.left != null) {
                             curr_node = node.*.left.?;
                             continue;
@@ -98,7 +198,6 @@ fn AVL(comptime T: type) type {
                             break;
                         }
                     } else if (data > node.*.data) {
-                        try path.append(Direction.Right);
                         if (node.*.right != null) {
                             curr_node = node.*.right.?;
                             continue;
@@ -130,22 +229,17 @@ fn AVL(comptime T: type) type {
                         } else {
                             std.debug.print("\n{} is left-critical ", .{curr_node.?.data});
                             //left-critical
-                            //does it require double rotation or single?
                             const left_child = curr_node.?.left.?;
                             if (data < left_child.data) {
                                 //single rotation => child inserted at left-subtree of left-child
-                                // std.debug.print("\n Performing rightRotate on {} ", .{curr_node.?.data});
 
                                 self.rightRotate(curr_node.?);
                             } else {
                                 //double rotation => child inserted at left-subtree of left-child
-                                // std.debug.print("\n Performing double rotation on {} ", .{curr_node.?.data});
 
                                 self.leftRotate(left_child);
                                 self.rightRotate(curr_node.?);
                             }
-
-                            // curr_node.?.balance = .Balanced;
                         }
                     } else if (height_diff > 0) {
                         if (abs_ht_diff == 1) {
@@ -156,17 +250,14 @@ fn AVL(comptime T: type) type {
 
                             const right_child = curr_node.?.right.?;
                             if (data > right_child.data) {
-                                // std.debug.print("\n Performing leftRotate on {} ", .{curr_node.?.data});
                                 //single rotation => child inserted at left-subtree of left-child
                                 self.leftRotate(curr_node.?);
                             } else {
-                                // std.debug.print("\n Performing double rotation on {} ", .{curr_node.?.data});
                                 //double rotation => child inserted at left-subtree of left-child
                                 self.rightRotate(right_child);
                                 self.leftRotate(curr_node.?);
                             }
                             //right-critical
-                            // curr_node.?.balance = .Balanced;
                         }
                     } else {
                         //balanced
@@ -377,6 +468,110 @@ test "search" {
     try tree.insert(2);
 
     _ = tree.search(2);
+
+    std.debug.print("\nno. of nodes: {}\n", .{tree.count});
+
+    defer tree.deinit();
+}
+
+test "delete leaf node" {
+    var allocator = std.testing.allocator;
+
+    var tree = AVL(usize).init(allocator);
+    try tree.insert(10);
+    try tree.insert(20);
+    try tree.insert(40);
+    try tree.insert(15);
+    try tree.insert(16);
+    try tree.insert(12);
+    try tree.insert(5);
+    try tree.insert(2);
+
+    tree.delete(2);
+
+    std.debug.print("\nno. of nodes: {}\n", .{tree.count});
+
+    defer tree.deinit();
+}
+
+test "delete node with one child" {
+    var allocator = std.testing.allocator;
+
+    var tree = AVL(usize).init(allocator);
+    try tree.insert(10);
+    try tree.insert(20);
+    try tree.insert(40);
+    try tree.insert(15);
+    try tree.insert(16);
+    try tree.insert(12);
+    try tree.insert(5);
+    try tree.insert(2);
+
+    tree.delete(5);
+
+    std.debug.print("\nno. of nodes: {}\n", .{tree.count});
+
+    defer tree.deinit();
+}
+
+test "delete node with two children" {
+    var allocator = std.testing.allocator;
+
+    var tree = AVL(usize).init(allocator);
+    try tree.insert(10);
+    try tree.insert(20);
+    try tree.insert(40);
+    try tree.insert(15);
+    try tree.insert(16);
+    try tree.insert(12);
+    try tree.insert(5);
+    try tree.insert(2);
+
+    tree.delete(15);
+
+    std.debug.print("\nno. of nodes: {}\n", .{tree.count});
+
+    defer tree.deinit();
+}
+
+test "delete non-existent element" {
+    var allocator = std.testing.allocator;
+
+    var tree = AVL(usize).init(allocator);
+    try tree.insert(10);
+    try tree.insert(20);
+    try tree.insert(40);
+    try tree.insert(15);
+    try tree.insert(16);
+    try tree.insert(12);
+    try tree.insert(5);
+    try tree.insert(2);
+
+    tree.delete(35);
+    tree.delete(15);
+    tree.delete(15);
+
+    std.debug.print("\nno. of nodes: {}\n", .{tree.count});
+
+    defer tree.deinit();
+}
+
+test "delete multiple elements" {
+    var allocator = std.testing.allocator;
+
+    var tree = AVL(usize).init(allocator);
+    try tree.insert(10);
+    try tree.insert(20);
+    try tree.insert(40);
+    try tree.insert(15);
+    try tree.insert(16);
+    try tree.insert(12);
+    try tree.insert(5);
+    try tree.insert(2);
+
+    tree.delete(15);
+    tree.delete(12);
+    tree.delete(40);
 
     std.debug.print("\nno. of nodes: {}\n", .{tree.count});
 
